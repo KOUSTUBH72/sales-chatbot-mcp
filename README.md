@@ -25,6 +25,7 @@ Gemini agents call tools exposed by an MCP server, which gives controlled, read-
 - **Guardrails:** collection allow-list, blocked `$out` and `$merge`, 50-row result limit, errors returned as text.
 - **Deterministic tools for arithmetic:** the evaluation showed the LLM making sums slightly wrong, so totals are computed in the database.
 - **Multi-agent trade-off:** better separation of concerns and answer checking, at the cost of more latency and requests per question.
+- **Least privilege:** the MCP server connects as a read-only database user, so writes are refused by MongoDB itself, in addition to the application-level guardrails.
 
 ## Evaluation
 
