@@ -4,15 +4,25 @@ from pymongo import MongoClient
 from dotenv import load_dotenv
 
 load_dotenv()
-db = MongoClient(os.getenv("MONGO_URI"))["sales_db"]
+# Prefers a read-only user if MONGO_URI_READONLY is set in .env, otherwise uses MONGO_URI
+db = MongoClient(os.getenv("MONGO_URI_READONLY") or os.getenv("MONGO_URI"))["sales_db"]
 mcp = FastMCP("sales-db")
 
-BLOCKED_STAGES = {"$out", "$merge"}
+BLOCKED_OPERATORS = {"$out", "$merge", "$function", "$accumulator"}
 ALLOWED_COLLECTIONS = {"orders", "customers", "products"}
 
 
 def _dump(data) -> str:
     return json.dumps(data, default=str, indent=2)
+
+
+def _contains_blocked(obj) -> bool:
+    """Scan the whole pipeline, including nested sub-pipelines."""
+    if isinstance(obj, dict):
+        return any(k in BLOCKED_OPERATORS or _contains_blocked(v) for k, v in obj.items())
+    if isinstance(obj, list):
+        return any(_contains_blocked(x) for x in obj)
+    return False
 
 
 @mcp.tool()
@@ -26,17 +36,19 @@ def get_schema() -> str:
 
 
 @mcp.tool()
-def run_aggregation(collection: str, pipeline: list) -> str:
+def run_aggregation(collection: str, pipeline: list[dict]) -> str:
     """Run a read-only MongoDB aggregation pipeline on 'orders', 'customers' or 'products'.
-    Returns at most 50 documents. Write stages ($out, $merge) are blocked."""
+    Returns at most 50 documents. Write stages and server-side JavaScript are blocked."""
     if collection not in ALLOWED_COLLECTIONS:
         return f"Error: collection must be one of {sorted(ALLOWED_COLLECTIONS)}"
-    for stage in pipeline:
-        if not isinstance(stage, dict) or BLOCKED_STAGES & set(stage.keys()):
-            return "Error: write stages are not allowed."
+    if _contains_blocked(pipeline):
+        return "Error: write stages and JavaScript operators are not allowed."
     try:
-        result = list(db[collection].aggregate(pipeline + [{"$limit": 50}]))
-        return _dump(result)
+        result = list(db[collection].aggregate(pipeline + [{"$limit": 51}], maxTimeMS=10000))
+        note = ""
+        if len(result) > 50:
+            result, note = result[:50], "\n(Result truncated to the first 50 rows.)"
+        return _dump(result) + note
     except Exception as e:
         return f"Query failed: {e}"
 
