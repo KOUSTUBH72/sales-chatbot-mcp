@@ -1,0 +1,7 @@
+pymongo
+dnspython
+pandas
+python-dotenv
+mcp[cli]<2
+google-genai
+streamlit
